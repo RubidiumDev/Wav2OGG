@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WAV to OGG Converter</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+
+        
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 2rem;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: rgba(255, 255, 255, 0.95);
+      border-radius: 20px;
+      padding: 2rem;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    }
+    h1 { color: #667eea; margin-bottom: 1rem; }
+    .drop-zone {
+      border: 3px dashed #667eea;
+      border-radius: 10px;
+      padding: 3rem;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.3s;
+      margin: 2rem 0;
+    }
+    .drop-zone:hover { background: #f7f7f7; border-color: #764ba2; }
+    .file-list { margin: 2rem 0; }
+    .file-item {
+      background: #f7f7f7;
+      padding: 1rem;
+      border-radius: 8px;
+      margin: 0.5rem 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    button {
+      background: #667eea;
+      color: white;
+      border: none;
+      padding: 0.75rem 1.5rem;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 1rem;
+      transition: all 0.3s;
+    }
+    button:hover { background: #764ba2; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    .btn-download { background: #10b981; }
+    .btn-download:hover { background: #059669; }
+    .error { background: #fee; color: #c00; padding: 1rem; border-radius: 8px; margin: 1rem 0; }
+    .success { background: #efe; color: #070; padding: 1rem; border-radius: 8px; margin: 1rem 0; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Simple WAV to OGG Converter</h1>
+    <p>Compress your fatass wav files to ogg format</p>
+    
+    <div class="drop-zone" id="dropZone">
+      <p>Click or drag WAV files</p>
+      <input type="file" id="fileInput" multiple accept=".wav" style="display:none">
+    </div>
+    
+    <div id="error" class="error hidden"></div>
+    <div id="success" class="success hidden"></div>
+    
+    <div id="fileList" class="file-list"></div>
+    
+    <button id="convertBtn" class="hidden">Convert</button>
+    <button id="downloadBtn" class="btn-download hidden">Download All</button>
+  </div>
+
+  <script>
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const fileList = document.getElementById('fileList');
+    const convertBtn = document.getElementById('convertBtn');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const errorDiv = document.getElementById('error');
+    const successDiv = document.getElementById('success');
+    
+    let files = [];
+    
+    dropZone.addEventListener('click', () => fileInput.click());
+    
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.style.background = '#f0f0f0';
+    });
+    
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.style.background = '';
+    });
+    
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.style.background = '';
+      handleFiles(e.dataTransfer.files);
+    });
+    
+    fileInput.addEventListener('change', (e) => {
+      handleFiles(e.target.files);
+    });
+    
+    function handleFiles(fileList) {
+      files = Array.from(fileList).filter(f => f.name.toLowerCase().endsWith('.wav'));
+      
+      if (files.length === 0) {
+        showError('Please select WAV files only');
+        return;
+      }
+      
+      hideError();
+      displayFiles();
+      convertBtn.classList.remove('hidden');
+      downloadBtn.classList.add('hidden');
+    }
+    
+    function displayFiles() {
+      fileList.innerHTML = files.map((f, i) => `
+        <div class="file-item" id="file-${i}">
+          <div>
+            <strong>${f.name}</strong><br>
+            <small>${formatSize(f.size)} <span id="result-${i}"></span></small>
+          </div>
+          <span id="status-${i}">Ready</span>
+        </div>
+      `).join('');
+    }
+    
+    convertBtn.addEventListener('click', convertFiles);
+    downloadBtn.addEventListener('click', downloadAll);
+    
+    async function convertFiles() {
+      convertBtn.disabled = true;
+      convertBtn.textContent = 'Converting...';
+      hideError();
+      
+      if (!MediaRecorder.isTypeSupported('audio/ogg; codecs=opus') && 
+          !MediaRecorder.isTypeSupported('audio/webm; codecs=opus')) {
+        showError('Bros browser does not support ogg encoding in the big 25 💀');
+        convertBtn.disabled = false;
+        convertBtn.textContent = 'Convert to oggism';
+        return;
+      }
+      
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      
+      for (let i = 0; i < files.length; i++) {
+        try {
+          document.getElementById(`status-${i}`).textContent = 'Converting...';
+          
+          const arrayBuffer = await files[i].arrayBuffer();
+          const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+          const oggBlob = await encodeOgg(audioBuffer);
+          
+          files[i].convertedBlob = oggBlob;
+          files[i].convertedSize = oggBlob.size;
+          
+          const savings = ((1 - oggBlob.size / files[i].size) * 100).toFixed(1);
+          document.getElementById(`result-${i}`).innerHTML = 
+            `→ <span style="color:#10b981">${formatSize(oggBlob.size)} (${savings}% smaller)</span>`;
+          document.getElementById(`status-${i}`).textContent = 'Done';
+        } catch (err) {
+          console.error(err);
+          document.getElementById(`status-${i}`).textContent = 'Error';
+        }
+      }
+      
+      await audioContext.close();
+      convertBtn.classList.add('hidden');
+      downloadBtn.classList.remove('hidden');
+      showSuccess('Complete');
+    }
+    
+    async function encodeOgg(audioBuffer) {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const source = ctx.createBufferSource();
+      source.buffer = audioBuffer;
+      const dest = ctx.createMediaStreamDestination();
+      source.connect(dest);
+      
+      const mimeType = MediaRecorder.isTypeSupported('audio/ogg; codecs=opus')
+        ? 'audio/ogg; codecs=opus'
+        : 'audio/webm; codecs=opus';
+      
+      const mediaRecorder = new MediaRecorder(dest.stream, {
+        mimeType: mimeType,
+        audioBitsPerSecond: 128000
+      });
+      
+      const chunks = [];
+      
+      return new Promise((resolve, reject) => {
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) chunks.push(e.data);
+        };
+        
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(chunks, { type: mimeType });
+          ctx.close();
+          resolve(blob);
+        };
+        
+        mediaRecorder.onerror = (e) => {
+          ctx.close();
+          reject(e);
+        };
+        
+        mediaRecorder.start(100);
+        source.start(0);
+        
+        setTimeout(() => {
+          if (mediaRecorder.state !== 'inactive') {
+            mediaRecorder.stop();
+          }
+          dest.stream.getTracks().forEach(track => track.stop());
+        }, (audioBuffer.duration * 1000) + 500);
+      });
+    }
+    
+    function downloadAll() {
+      files.forEach(file => {
+        if (file.convertedBlob) {
+          const url = URL.createObjectURL(file.convertedBlob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = file.name.replace(/\.wav$/i, '.ogg');
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+      });
+    }
+    
+    function formatSize(bytes) {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return (bytes / Math.pow(k, i)).toFixed(2) + ' ' + sizes[i];
+    }
+    
+    function showError(msg) {
+      errorDiv.textContent = msg;
+      errorDiv.classList.remove('hidden');
+    }
+    
+    function hideError() {
+      errorDiv.classList.add('hidden');
+    }
+    
+    function showSuccess(msg) {
+      successDiv.textContent = msg;
+      successDiv.classList.remove('hidden');
+    }
+  </script>
+</body>
+</html>
